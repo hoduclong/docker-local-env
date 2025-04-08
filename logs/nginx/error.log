@@ -1,0 +1,5 @@
+2025/03/04 15:00:44 [notice] 22#22: signal process started
+2025/03/04 15:03:56 [notice] 42#42: signal process started
+2025/03/04 16:46:58 [notice] 62#62: signal process started
+2025/03/04 17:20:38 [emerg] 7#7: host not found in upstream "php82" in /etc/nginx/conf.d/local-bengawan.com.conf:37
+2025/03/05 11:10:51 [emerg] 7#7: host not found in upstream "php82" in /etc/nginx/conf.d/local-bengawan.com.conf:37
