@@ -7,7 +7,7 @@ COMMON_SERVICES = nginx mysql mailhog elasticsearch redis
 SERVICES_81C2 = $(COMMON_SERVICES) php81-c2
 SERVICES_82   = $(COMMON_SERVICES) php82
 SERVICES_83   = $(COMMON_SERVICES) php83
-SERVICES_84   = $(COMMON_SERVICES) php84
+SERVICES   = $(COMMON_SERVICES) php81-c2 php83 php82 
 
 .PHONY: up81-c2 up82 up83 up84 down ps logs restart81-c2 restart82 restart83 bash plato hanleys npm-run-watch
 
@@ -21,14 +21,14 @@ up82:
 up83:
 	$(DOCKER_COMPOSE) up -d $(SERVICES_83)
 
-up84:
-	$(DOCKER_COMPOSE) up -d $(SERVICES_84)
+up:
+	$(DOCKER_COMPOSE) up -d $(SERVICES)
 
 # ======= RESTART COMMANDS =======
 restart81-c2: down up81-c2
 restart82: down up82
 restart83: down up83
-restart84: down up84
+restart: down up
 
 # ======= COMMON TASKS =======
 down:
@@ -49,6 +49,12 @@ plato:
 
 hanleys:
 	@$(MAKE) bash V=83 D=hanleys
+
+rowe:
+	@$(MAKE) bash V=82 D=rowe
+
+five-senses:
+	@$(MAKE) bash V=81-c2 D=five-senses
 
 npm-run-watch:
 	@$(MAKE) bash V=82 D=plato
