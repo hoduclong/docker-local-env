@@ -235,7 +235,7 @@ Version $VERSION
       Drop database:
         ./scripts/$(basename "$0") drop --database-name=database_name
       Import database:
-        ./scripts/$(basename "$0") import --source=database_file --target=database_name
+        ./scripts/$(basename "$0") import --source=database_file --target=database_name 
 "
     _printPoweredBy
     exit 1
@@ -410,7 +410,6 @@ function checkCmdDependencies()
       date
       find
       awk
-      docker-compose
       docker
     )
 
@@ -499,7 +498,7 @@ function importMysqlDatabase()
     then
         _success "Database existed"
         _arrow "Import database"
-        docker-compose exec -T mysql mysql -u root -p${rootPass} ${DATABASE_IMPORT_TARGET_NAME} < ${IMPORT_DIR}/${DATABASE_IMPORT_SOURCE_NAME} 2>&1 | grep -v "Using a password"
+        docker-compose exec -T mysql mysql --force -u root -p${rootPass} ${DATABASE_IMPORT_TARGET_NAME} < ${IMPORT_DIR}/${DATABASE_IMPORT_SOURCE_NAME} 2>&1 | grep -v "Using a password"
         _success "Database name ${DATABASE_IMPORT_TARGET_NAME} imported"
     else 
         _error "Database ${DATABASE_IMPORT_TARGET_NAME} not exists. Please create it!!"
