@@ -16,6 +16,12 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    networks:
+      default:
+        aliases:
+          - local.mycar.com
+          - local.mycar.api.com
+
   php70:
     build:
       context: ./build/php70
@@ -123,6 +129,7 @@ services:
       - "host.docker.internal:host-gateway" 
     volumes:
       - ./sources:/home/public_html
+      - ./ssh:/home/nginx/.ssh
       - composer_cache:/home/nginx/.composer
       - ./conf/php/php82/magento.conf:/etc/php/8.2/fpm/pool.d/www.conf
       - ./conf/php/php82/php.ini:/etc/php/8.2/fpm/php.ini
@@ -243,7 +250,7 @@ services:
   elasticsearch8:
     build:
       context: ./build/elasticsearch8
-      args: 
+      args:
           ELASTICSEARCH_VERSION: ${ELASTICSEARCH_VERSION_8}
     image: elasticsearch-manual:${ELASTICSEARCH_VERSION_8}
     environment:
