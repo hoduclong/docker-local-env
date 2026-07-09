@@ -2,6 +2,7 @@
 - [MỤC LỤC](#mục-lục)
 - [GIỚI THIỆU](#giới-thiệu)
   - [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
+  - [Cài đặt make](#cài-đặt-make)
     - [Giới thiệu hệ thống](#giới-thiệu-hệ-thống)
       - [Cấu trúc thư mục hệ thống](#cấu-trúc-thư-mục-hệ-thống)
       - [Các services được cấu hình sẵn trong hệ thống](#các-services-được-cấu-hình-sẵn-trong-hệ-thống)
@@ -11,8 +12,12 @@
   - [Các lệnh docker/docker-compose cơ bản](#các-lệnh-dockerdocker-compose-cơ-bản)
   - [Hướng dẫn sử dụng hệ thống](#hướng-dẫn-sử-dụng-hệ-thống)
   - [Bắt đầu sử dụng](#bắt-đầu-sử-dụng)
+  - [Sử dụng Makefile](#sử-dụng-makefile)
+  - [Chạy project theo profile](#chạy-project-theo-profile)
   - [Xoá dữ liệu](#xoá-dữ-liệu)
   - [Một số ví dụ](#một-số-ví-dụ)
+    - [Chạy project đã có profile](#chạy-project-đã-có-profile)
+    - [Chạy project mới lần đầu](#chạy-project-mới-lần-đầu)
     - [Khởi tạo và chạy nginx, php72, mysql](#khởi-tạo-và-chạy-nginx-php72-mysql)
     - [Khởi tạo thêm php72](#khởi-tạo-thêm-php72)
     - [Bật Xdebug cho php72](#bật-xdebug-cho-php72)
@@ -55,6 +60,48 @@ chmod +x /usr/local/bin/docker-compose
 ```bash
 sudo usermod -aG docker $USER
 ```
+
+## Cài đặt make
+
+Repo này có Makefile để gom các lệnh thường dùng như start project, tạo database, tạo vhost, SSL và mở shell vào container PHP.
+
+Kiểm tra máy đã có `make` chưa:
+
+```bash
+make --version
+```
+
+Cài đặt trên macOS:
+
+```bash
+xcode-select --install
+```
+
+Nếu dùng Homebrew:
+
+```bash
+brew install make
+```
+
+Cài đặt trên Ubuntu/Debian:
+
+```bash
+sudo apt-get update
+sudo apt-get install make -y
+```
+
+Cài đặt trên Fedora/RHEL/CentOS:
+
+```bash
+sudo dnf install make -y
+```
+
+Sau khi cài, đứng ở thư mục có `Makefile` và chạy:
+
+```bash
+make help
+```
+
 ### Giới thiệu hệ thống
 ```bash
 ❯ tree
@@ -86,6 +133,7 @@ sudo usermod -aG docker $USER
 ├── conf
 │   ├── nginx
 │   │   ├── conf.d
+│   │   ├── enabled.d
 │   │   ├── nginx.conf
 │   │   └── ssl
 │   ├── php
@@ -159,6 +207,9 @@ sudo usermod -aG docker $USER
 |---------|-----------|
 | build   | Chứa các file sử dụng trong quá trình build container sử dụng cho hệ thống |
 | conf | Chứa các file config cho container sử dụng trong quá trình người dùng sử dụng |
+| conf/nginx/conf.d | Chứa toàn bộ nginx vhost đã tạo |
+| conf/nginx/enabled.d | Chứa nginx vhost đang được bật cho project hiện tại; nginx container chỉ đọc thư mục này |
+| conf/projects | Chứa project profile `conf/projects/<project>/project.env` dùng cho lệnh `make run-<project>` |
 | data | Chứa các dữ liệu cho các container như mysql, rabbitMQ |
 | database | Folder sử dụng cho các chức năng import/export database |
 | images | Folder ảnh của cái README.md này, LOL |
@@ -206,6 +257,7 @@ sudo usermod -aG docker $USER
 | ssl | Command sử dụng để tạo Virtual host SSL cho các domain được lựa chọn |
 | xdebug | Command sử dụng để bật/tắt xdebug của 1 service php được lựa chọn |
 | varnish | Command sử dụng để bật/tắt varnish của 1 domain được lựa chọn |
+| project | Command start/stop/init project profile, tự enable đúng nginx vhost và đúng service của project |
 
 #### Hệ thống email catch all
 
@@ -322,20 +374,181 @@ cd ~/docker-mangento
 # Tạo file .env
 cp env-example .env
 # Chỉnh sửa thông tin file .env nếu cần thiết
-# Khởi tạo hệ thống theo như cầu, ví dụ cần chạy nginx, php72, mysql, mailhog
-docker-compose up -d nginx php72 mysql mailhog
-# Khởi tạo thêm service nếu cần thêm, ví dụ hệ thống cần chạy thêm elasticsearch, redis
-docker-compose up -d redis elasticsearch
-# List các services đang chạy
-./scripts/list-services
+
+# Chạy project đã có profile, ví dụ maxcare
+make maxcare
+
+# Hoặc chạy project mới lần đầu, script sẽ hỏi thông tin và tạo profile/vhost/SSL
+make run-myproject
+
+# List các project đã có profile
+make project-list
 
 ```
+
+## Sử dụng Makefile
+
+Xem toàn bộ command đang được hỗ trợ:
+
+```bash
+make help
+```
+
+Makefile hiện được chia theo các nhóm chính:
+
+| Nhóm | Lệnh tiêu biểu | Mục đích |
+|------|----------------|----------|
+| Project profile | `make maxcare`, `make run-<project>`, `make stop-<project>`, `make init-<project>` | Start/stop/init đúng service và đúng nginx vhost của project |
+| Compose stack | `make up81-c2`, `make up82`, `make up83`, `make up`, `make down`, `make ps`, `make logs` | Chạy stack thủ công/legacy |
+| Shell shortcut | `make maxcare-shell`, `make plato`, `make mycar`, `make bash V=82 D=plato` | Vào shell trong PHP container |
+| Database | `make create-db`, `make import-db`, `make setup-db` | Tạo/import database |
+| Site/vhost | `make create-vhost`, `make ssl`, `make init-site` | Tạo nginx vhost và SSL |
+
+Các biến thường dùng:
+
+| Biến | Ví dụ | Ý nghĩa |
+|------|-------|---------|
+| `D` | `D=local.maxcare.com` | Domain hoặc database name tuỳ target |
+| `P` | `P=81-c2` hoặc `P=php81-c2` | PHP version khi tạo vhost |
+| `R` | `R=local.maxcare.com/src` | Root dir nằm trong `./sources` |
+| `V` | `V=82` hoặc `V=81-c2` | PHP version cho shell shortcut |
+| `DB` | `DB=maxcare` | Database name khi tạo database |
+| `S` | `S=maxcare.sql.gz` | File SQL/GZ khi import bằng `setup-db` |
+
+Ví dụ:
+
+```bash
+# Start project profile
+make run-maxcare
+
+# Stop project profile
+make stop-maxcare
+
+# Vào shell source maxcare
+make maxcare-shell
+
+# Vào shell theo domain/version tuỳ chọn
+make bash/src V=81-c2 D=maxcare
+
+# Tạo database
+make create-db DB=maxcare
+
+# Tạo database và import file SQL/GZ
+make setup-db D=maxcare S=databases/import/maxcare.sql.gz
+
+# Tạo vhost + SSL cho project có source trong ./sources/local.example.com/src
+make init-site D=local.example.com P=81-c2 R=local.example.com/src
+```
+
+Lưu ý:
+
+- `make run-<project>` là cách nên dùng cho project cụ thể vì nó chỉ enable đúng nginx vhost trong `conf/nginx/enabled.d`.
+- Các target `make up...` là cách thủ công/legacy, dùng khi muốn tự kiểm soát service đang chạy.
+- `P` ở `create-vhost/init-site` nhận được cả `81-c2` và `php81-c2`.
+
+## Chạy project theo profile
+
+Phiên bản hiện tại khuyến khích chạy project bằng profile thay vì start thủ công toàn bộ service bằng `docker-compose up -d ...`.
+
+Mỗi project có một file cấu hình:
+
+```bash
+conf/projects/<project>/project.env
+```
+
+Ví dụ:
+
+```env
+DOMAIN=local.maxcare.com
+ROOT_DIR=local.maxcare.com/src
+APP_TYPE=magento2
+PHP_SERVICE=php81-c2
+SEARCH_SERVICE=elasticsearch
+DB_SERVICE=mysql
+SERVICES="nginx mysql mailhog redis elasticsearch php81-c2"
+ACTIVE_VHOSTS="local.maxcare.com"
+```
+
+Ý nghĩa các field:
+
+| Field | Ý nghĩa |
+|-------|---------|
+| DOMAIN | Domain chính của project |
+| ROOT_DIR | Thư mục source nằm trong `./sources`, ví dụ `local.maxcare.com/src` |
+| APP_TYPE | Loại app dùng khi tạo vhost: `magento1`, `magento2`, `wordpress`, `laravel`, `default` |
+| PHP_SERVICE | PHP service cần chạy, ví dụ `php81-c2`, `php82`, `php83`, `php84` |
+| SEARCH_SERVICE | Search service cần chạy: `elasticsearch`, `elasticsearch8`, `opensearch`, `opensearch3`, hoặc `none` |
+| DB_SERVICE | Database service: `mysql` hoặc `mysql57` |
+| SERVICES | Danh sách service cần bật cho project |
+| ACTIVE_VHOSTS | Danh sách domain nginx cần enable cho project |
+
+Các lệnh chính:
+
+```bash
+# Xem project đã có profile
+make project-list
+
+# Chạy project đã có profile
+make run-maxcare
+
+# Shortcut riêng cho maxcare
+make maxcare
+
+# Stop project
+make stop-maxcare
+
+# Tạo/check config, vhost, SSL nhưng chưa cần start lại project flow đầy đủ
+make init-maxcare
+```
+
+Nếu chạy project chưa có profile, ví dụ:
+
+```bash
+make run-myproject
+```
+
+script sẽ mở first-run wizard và hỏi từng mục như `DOMAIN`, `ROOT_DIR`, `PHP_SERVICE`, `SEARCH_SERVICE`, `DB_SERVICE`. Sau đó script sẽ:
+
+1. Tạo `conf/projects/myproject/project.env`
+2. Tạo nginx vhost nếu chưa có
+3. Tạo SSL nếu chưa có
+4. Enable đúng vhost vào `conf/nginx/enabled.d`
+5. Start đúng service của project
+
+Lưu ý về nginx:
+
+- `conf/nginx/conf.d` là nơi lưu toàn bộ vhost đã tạo.
+- `conf/nginx/enabled.d` là nơi nginx container thật sự đọc.
+- Khi chạy `make run-<project>`, script sẽ copy đúng vhost của project từ `conf.d` sang `enabled.d`.
+- Cách này tránh lỗi nginx fail vì đọc vhost của project khác đang trỏ tới PHP/search service chưa chạy, ví dụ `host not found in upstream "php84"`.
+
+Nếu cần chạy nhiều project cùng lúc trong cùng stack, tạo một profile gom chung:
+
+```env
+DOMAIN=local.project-a.com
+ROOT_DIR=local.project-a.com/src
+APP_TYPE=magento2
+PHP_SERVICE=php81-c2
+SEARCH_SERVICE=elasticsearch
+DB_SERVICE=mysql
+SERVICES="nginx mysql mailhog redis elasticsearch php81-c2 php84"
+ACTIVE_VHOSTS="local.project-a.com local.project-b.com"
+```
+
+Khi push code này sang máy khác đã có nhiều dự án, cần tạo `conf/projects/<project>/project.env` cho từng dự án muốn chạy bằng flow mới. Có thể copy từ:
+
+```bash
+conf/projects/project.env.example
+```
+
 ## Xoá dữ liệu
 
 Trong trường hợp bạn muốn xoá toàn bộ dữ liệu (do rảnh quá, thích tạo cái mới trắng tinh chơi, lol), bạn cần xoá các thư mục sau:
 
 - Các thư mục chứa source code trong: ./data/
 - Các file nginx config trong: ./conf/nginx/conf.d/
+- Các file nginx config đang enable trong: ./conf/nginx/enabled.d/
+- Các project profile trong: ./conf/projects/
 - Stop và xoá các container cũng như các docker volume cũ, để stop container và xoá container/volume có thể chạy lệnh:
 ```bash
 docker-compose down -v --remove-orphans
@@ -343,7 +556,73 @@ docker-compose down -v --remove-orphans
 
 ## Một số ví dụ
 
+### Chạy project đã có profile
+
+Ví dụ project `maxcare` đã có file:
+
+```bash
+conf/projects/maxcare/project.env
+```
+
+Chạy project:
+
+```bash
+make maxcare
+```
+
+Hoặc dùng format chung:
+
+```bash
+make run-maxcare
+```
+
+Vào shell source của maxcare:
+
+```bash
+make maxcare-shell
+```
+
+Stop project:
+
+```bash
+make stop-maxcare
+```
+
+### Chạy project mới lần đầu
+
+Ví dụ muốn chạy project mới tên `myshop`:
+
+```bash
+make run-myshop
+```
+
+Nếu chưa có `conf/projects/myshop/project.env`, script sẽ hỏi:
+
+```text
+DOMAIN [local.myshop.com]:
+ROOT_DIR (folder under ./sources) [local.myshop.com]:
+APP_TYPE (magento1|magento2|wordpress|laravel|default) [magento2]:
+PHP_SERVICE [php81-c2]:
+SEARCH_SERVICE (elasticsearch|elasticsearch8|opensearch|opensearch3|none) [elasticsearch]:
+DB_SERVICE (mysql|mysql57) [mysql]:
+ACTIVE_VHOSTS [local.myshop.com]:
+```
+
+Nếu source nằm trong `./sources/local.myshop.com/src`, nhập:
+
+```text
+ROOT_DIR: local.myshop.com/src
+```
+
+Sau setup lần đầu, các lần sau chỉ cần:
+
+```bash
+make run-myshop
+```
+
 ### Khởi tạo và chạy nginx, php72, mysql, mailhog
+Đây là cách chạy thủ công/legacy. Với project cụ thể nên ưu tiên dùng `make run-<project>` để nginx chỉ enable đúng vhost của project đó.
+
 Default hệ thống sẽ gửi mail thông qua mailhog, do đó khi tạo bất cứ 1 stack mới nào cần start thêm mailhog.
 ```bash
 docker-compose up -d nginx php72 mysql mailhog

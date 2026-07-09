@@ -1,39 +1,12 @@
-# Stage 1: Node.js 14 + Grunt CLI
-FROM node:14-bullseye as node-build
-
-RUN npm install -g grunt-cli
-
-# Stage 2: PHP 8.1 FPM
-FROM php:8.1-fpm
+FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LC_ALL=C.UTF-8
-ENV TINI_VERSION=v0.19.0
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        bash \
-        curl \
-        git \
-        unzip \
-        zip \
-        gnupg2 \
-        ca-certificates \
-        libzip-dev \
-        libonig-dev \
-        libicu-dev \
-        libxml2-dev \
-        libpng-dev \
-        libjpeg-dev \
-        libfreetype6-dev \
-        libxslt1-dev \
-        tzdata \
-        build-essential && \
-    docker-php-ext-install xsl sockets && \
+    apt-get install -y --no-install-recommends tini tzdata software-properties-common curl git sudo zip unzip ca-certificates gnupg vim && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
-
-ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /usr/bin/tini
-RUN chmod +x /usr/bin/tini
 
 RUN mkdir -p /home/public_html /run/php /var/lib/php/session && \
     groupadd -g 1000 nginx && \
@@ -42,41 +15,55 @@ RUN mkdir -p /home/public_html /run/php /var/lib/php/session && \
 
 WORKDIR /home/public_html
 
-# Enable GD with FreeType & JPEG support
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg
+RUN LC_ALL=C.UTF-8 add-apt-repository ppa:ondrej/php && \
+    apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+    php8.1 php8.1-dev php8.1-apcu php8.1-fpm php8.1-common \
+    php8.1-gd php8.1-intl php8.1-soap php8.1-opcache php8.1-xml \
+    php8.1-mysql php8.1-mbstring php8.1-bcmath php8.1-curl php8.1-zip \
+    php8.1-xdebug && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN docker-php-ext-install \
-    pdo_mysql \
-    mbstring \
-    intl \
-    soap \
-    gd \
-    bcmath \
-    zip \
-    opcache \
- && pecl install apcu xdebug \
- && docker-php-ext-enable apcu xdebug
- 
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/bin --filename=composer
+RUN update-alternatives --set php /usr/bin/php8.1 && \
+    update-alternatives --set phar /usr/bin/phar8.1 && \
+    update-alternatives --set phar.phar /usr/bin/phar.phar8.1 && \
+    update-alternatives --set phpize /usr/bin/phpize8.1 && \
+    update-alternatives --set php-config /usr/bin/php-config8.1
 
-RUN curl -sSL https://files.magerun.net/n98-magerun2.phar -o /usr/bin/n98-magerun2.phar && \
-    chmod +x /usr/bin/n98-magerun2.phar
+RUN dpkg-reconfigure -f noninteractive tzdata
 
-# Copy Node.js and npm from Node.js stage
-COPY --from=node-build /usr/local/bin/node /usr/local/bin/node
-COPY --from=node-build /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
-RUN ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+RUN unlink /etc/php/8.1/cli/conf.d/20-xdebug.ini 2>/dev/null || true && \
+    unlink /etc/php/8.1/fpm/conf.d/20-xdebug.ini 2>/dev/null || true
 
-RUN curl -L https://github.com/mailhog/mhsendmail/releases/download/v0.2.0/mhsendmail_linux_amd64 -o /usr/local/bin/mhsendmail && \
-    chmod +x /usr/local/bin/mhsendmail
+RUN curl https://getcomposer.org/download/2.8.4/composer.phar --output /usr/bin/composer && chmod +x /usr/bin/composer
 
-RUN mkdir /home/nginx/.composer && chown -R nginx:nginx /home/nginx/.composer
+RUN curl -sSL https://files.magerun.net/n98-magerun2.phar -o /usr/bin/n98-magerun2.phar && chmod +x /usr/bin/n98-magerun2.phar
 
-# Remove default www.conf so our mounted config can take effect
-RUN rm -f /usr/local/etc/php-fpm.d/www.conf
-# Modify zz-docker.conf to use port 9001 instead of 9000
-RUN sed -i 's/listen = 9000/listen = 9001/' /usr/local/etc/php-fpm.d/zz-docker.conf
+# Install Node.js 18.x and Grunt CLI via NodeSource (multi-arch supported)
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends nodejs && \
+    npm install -g grunt-cli && \
+    npm cache clean --force && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install mhsendmail (compiled from source for multi-arch support)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends golang-go && \
+    GOPATH=/tmp/gopath go install github.com/mailhog/mhsendmail@latest && \
+    cp /tmp/gopath/bin/mhsendmail /usr/local/bin/mhsendmail && \
+    chmod +x /usr/local/bin/mhsendmail && \
+    apt-get purge -y --auto-remove golang-go && \
+    apt-get clean && \
+    rm -rf /tmp/gopath /var/lib/apt/lists/*
+
+RUN mkdir -p /home/nginx/.composer && chown -R nginx:nginx /home/nginx/.composer
+
+RUN rm -f /etc/php/8.1/fpm/pool.d/www.conf
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["php-fpm"]
+CMD ["/usr/sbin/php-fpm8.1", "-F", "-O", "--fpm-config", "/etc/php/8.1/fpm/php-fpm.conf"]

@@ -30,16 +30,24 @@ RUN update-alternatives --set php /usr/bin/php8.2 && \
     update-alternatives --set php-config /usr/bin/php-config8.2
 
 RUN export DEBIAN_FRONTEND=noninteractive && apt-get install -y curl git sudo apt-utils vim zip unzip
+
+# Mail catcher: route PHP mail() to Mailpit (mailhog:1025) via msmtp.
+# sendmail_path is configured in conf/php/php82/php.ini.
+RUN export DEBIAN_FRONTEND=noninteractive && apt-get install -y msmtp
+
 RUN dpkg-reconfigure -f noninteractive tzdata
 
 # Install Composer
 RUN curl https://getcomposer.org/download/2.8.4/composer.phar --output /usr/bin/composer && chmod +x /usr/bin/composer
 RUN curl https://files.magerun.net/n98-magerun2.phar --output /usr/bin/n98-magerun2.phar && chmod +x /usr/bin/n98-magerun2.phar
 
-# Install Node.js and Grunt CLI
+# Install Node.js 20.x and Grunt CLI
 RUN export DEBIAN_FRONTEND=noninteractive && \
-    curl -sL https://deb.nodesource.com/setup_14.x -o nodesource_setup.sh && \
-    bash nodesource_setup.sh && \
+    apt-get install -y ca-certificates gnupg && \
+    mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && \
     apt-get install -y nodejs && \
     npm install -g grunt-cli
 

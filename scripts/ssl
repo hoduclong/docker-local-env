@@ -308,12 +308,20 @@ function checkSslCommand()
 {
     if ! command_exists mkcert; then
         _error "Missing mkcert command"
-            _warning "You need to install mkcert with this command below if you are using Ubuntu:"
+        if [[ "$(uname -s)" = "Darwin" ]]; then
+            _warning "You are on macOS. Install mkcert with:"
+            echo -n "    brew install mkcert
+    brew install nss
+    mkcert -install
+"
+        else
+            _warning "You are on Linux. Install mkcert with:"
             echo -n "    sudo apt-get install libnss3-tools -y
     sudo wget https://github.com/FiloSottile/mkcert/releases/download/v1.4.3/mkcert-v1.4.3-linux-amd64 -O /usr/local/bin/mkcert
     sudo chmod +x /usr/local/bin/mkcert
     mkcert -install
 "
+        fi
         exit 1
     fi
 }
@@ -332,7 +340,7 @@ function checkDomainExist ()
    if [[ -f ${NGINX_SITES_CONF_D}/$VHOST_DOMAIN.conf ]]; then 
         _success "Domain exists"
     else
-        _error "Domain not exist, Did you set it up on docker-compose system?"
+        _error "Domain not exist, Did you set it up on docker compose system?"
         exit 1
     fi
 }
@@ -382,9 +390,9 @@ function prepareSslVhostContent()
 
 function reloadNginx()
 {
-    local _nginxTest=$(docker-compose exec nginx nginx -t)
+    local _nginxTest=$(docker compose exec nginx nginx -t)
     if [[ $? -eq 0 ]]; then
-        docker-compose exec nginx nginx -s reload || _die "Nginx couldn't be reloaded."
+        docker compose exec nginx nginx -s reload || _die "Nginx couldn't be reloaded."
     else
         echo "$_nginxTest"
     fi

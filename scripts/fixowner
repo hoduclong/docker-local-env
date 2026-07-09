@@ -7,6 +7,6 @@ if [[ -f "$(pwd)/.root_dir" ]]; then
     echo "Files ownerships fixed."
     exit 0
 else
-    echo "Please change your current folder to docker-compose root folder (root folder is the folder contain docker-compose.yml file)."
+    echo "Please change your current folder to docker compose root folder (root folder is the folder contain docker-compose.yml file)."
     exit 1
 fi

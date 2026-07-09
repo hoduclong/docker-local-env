@@ -1,0 +1,353 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+export DOCKER_CLI_HINTS=false
+
+PROJECTS_DIR="conf/projects"
+NGINX_AVAILABLE_DIR="conf/nginx/conf.d"
+NGINX_ENABLED_DIR="conf/nginx/enabled.d"
+
+PHP_SERVICES=(php70 php71 php72 php73 php74 php74-c2 php81-c2 php82 php83 php84)
+SEARCH_SERVICES=(elasticsearch elasticsearch8 opensearch opensearch3)
+COMMON_SERVICES=(nginx mysql mailhog redis)
+
+function usage() {
+    cat <<USAGE
+Usage:
+  ./scripts/project start <name>
+  ./scripts/project stop <name>
+  ./scripts/project init <name>
+  ./scripts/project list
+
+Project config lives in:
+  conf/projects/<name>/project.env
+USAGE
+}
+
+function die() {
+    printf 'Error: %s\n' "$*" >&2
+    exit 1
+}
+
+function project_config() {
+    local project="$1"
+    printf '%s/%s/project.env' "$PROJECTS_DIR" "$project"
+}
+
+function is_tty() {
+    [[ -t 0 ]]
+}
+
+function prompt() {
+    local label="$1"
+    local default_value="${2:-}"
+    local value
+
+    if [[ -n "$default_value" ]]; then
+        read -r -p "$label [$default_value]: " value
+        printf '%s' "${value:-$default_value}"
+    else
+        read -r -p "$label: " value
+        printf '%s' "$value"
+    fi
+}
+
+function normalize_php_service() {
+    local value="$1"
+
+    if [[ "$value" != php* ]]; then
+        value="php$value"
+    fi
+
+    printf '%s' "$value"
+}
+
+function service_exists() {
+    local service="$1"
+    docker compose config --services | grep -qx "$service"
+}
+
+function validate_service() {
+    local service="$1"
+    [[ -n "$service" ]] || return 0
+    # Do not abort the wizard if the service is not (yet) listed by
+    # `docker compose config` (e.g. compose file mid-edit, or the container
+    # simply not started yet). Just warn and continue; the later
+    # `docker compose up -d` will start it from the entered info, and surface a
+    # real error only if the service genuinely does not exist.
+    service_exists "$service" \
+        || printf 'Warning: docker compose service "%s" not found yet; continuing and will start it from the entered config.\n' "$service" >&2
+}
+
+function build_services() {
+    local php_service="$1"
+    local search_service="$2"
+    local db_service="$3"
+    local services=(nginx "$db_service" mailhog redis "$php_service")
+
+    if [[ -n "$search_service" && "$search_service" != "none" ]]; then
+        services+=("$search_service")
+    fi
+
+    printf '%s ' "${services[@]}"
+}
+
+function create_project_config() {
+    local project="$1"
+    local config project_dir
+    local domain root_dir app_type php_service search_service db_service active_vhosts services
+
+    config="$(project_config "$project")"
+    project_dir="$(dirname "$config")"
+
+    if [[ -f "$config" ]]; then
+        return 0
+    fi
+
+    is_tty || die "Missing $config and cannot run first-run wizard without an interactive terminal."
+
+    printf 'Project config not found: %s\n' "$config"
+    printf 'First-run setup for project: %s\n\n' "$project"
+
+    domain="$(prompt "DOMAIN" "local.$project.com")"
+    root_dir="$(prompt "ROOT_DIR (folder under ./sources)" "$domain")"
+    app_type="$(prompt "APP_TYPE (magento1|magento2|wordpress|laravel|default)" "magento2")"
+    php_service="$(normalize_php_service "$(prompt "PHP_SERVICE" "php81-c2")")"
+    search_service="$(prompt "SEARCH_SERVICE (elasticsearch|elasticsearch8|opensearch|opensearch3|none)" "elasticsearch")"
+    db_service="$(prompt "DB_SERVICE (mysql|mysql57)" "mysql")"
+    active_vhosts="$(prompt "ACTIVE_VHOSTS" "$domain")"
+
+    validate_service "$php_service"
+    validate_service "$db_service"
+    if [[ "$search_service" != "none" ]]; then
+        validate_service "$search_service"
+    fi
+
+    services="$(build_services "$php_service" "$search_service" "$db_service")"
+    services="${services% }"
+
+    mkdir -p "$project_dir"
+    cat > "$config" <<EOF
+DOMAIN=$domain
+ROOT_DIR=$root_dir
+APP_TYPE=$app_type
+PHP_SERVICE=$php_service
+SEARCH_SERVICE=$search_service
+DB_SERVICE=$db_service
+SERVICES="$services"
+ACTIVE_VHOSTS="$active_vhosts"
+EOF
+
+    printf 'Created project config: %s\n' "$config"
+}
+
+function load_project() {
+    local project="$1"
+    local config
+    config="$(project_config "$project")"
+
+    if [[ ! -f "$config" ]]; then
+        create_project_config "$project"
+    fi
+
+    # shellcheck disable=SC1090
+    source "$config"
+
+    [[ -n "${DOMAIN:-}" ]] || die "DOMAIN is required in $config"
+    [[ -n "${ROOT_DIR:-}" ]] || ROOT_DIR="$DOMAIN"
+    [[ -n "${APP_TYPE:-}" ]] || APP_TYPE="magento2"
+    [[ -n "${PHP_SERVICE:-}" ]] || die "PHP_SERVICE is required in $config"
+    [[ -n "${SERVICES:-}" ]] || die "SERVICES is required in $config"
+    [[ -n "${ACTIVE_VHOSTS:-}" ]] || ACTIVE_VHOSTS="$DOMAIN"
+}
+
+function ensure_project_services_for_setup() {
+    local service
+    local setup_services=()
+
+    for service in $SERVICES; do
+        setup_services+=("$service")
+    done
+
+    docker compose up -d "${setup_services[@]}"
+}
+
+function ensure_vhost() {
+    local domain="$1"
+
+    if [[ -f "$NGINX_AVAILABLE_DIR/$domain.conf" ]]; then
+        printf 'Nginx vhost exists: %s\n' "$NGINX_AVAILABLE_DIR/$domain.conf"
+        return 0
+    fi
+
+    printf 'Creating nginx vhost for %s...\n' "$domain"
+    ensure_project_services_for_setup
+    ./scripts/create-vhost \
+        --domain="$domain" \
+        --app="$APP_TYPE" \
+        --root-dir="$ROOT_DIR" \
+        --php-version="$PHP_SERVICE"
+}
+
+function ensure_ssl() {
+    local domain="$1"
+
+    if [[ -f "conf/nginx/ssl/$domain.crt" && -f "conf/nginx/ssl/$domain.key" && -f "$NGINX_AVAILABLE_DIR/$domain-ssl.conf" ]]; then
+        printf 'SSL exists: %s\n' "$domain"
+        return 0
+    fi
+
+    printf 'Creating SSL for %s...\n' "$domain"
+    ./scripts/ssl --domain="$domain"
+}
+
+function ensure_project_files() {
+    local domain
+
+    for domain in $ACTIVE_VHOSTS; do
+        ensure_vhost "$domain"
+        ensure_ssl "$domain"
+    done
+}
+
+function contains_service() {
+    local needle="$1"
+    local service
+
+    for service in $SERVICES; do
+        [[ "$service" == "$needle" ]] && return 0
+    done
+
+    return 1
+}
+
+function enable_vhosts() {
+    local domain file base
+
+    mkdir -p "$NGINX_ENABLED_DIR"
+    find "$NGINX_ENABLED_DIR" -maxdepth 1 -type f -name '*.conf' -delete
+
+    for domain in $ACTIVE_VHOSTS; do
+        for base in "$domain.conf" "$domain-ssl.conf"; do
+            file="$NGINX_AVAILABLE_DIR/$base"
+            if [[ -f "$file" ]]; then
+                cp "$file" "$NGINX_ENABLED_DIR/$base"
+                printf 'Enabled nginx vhost: %s\n' "$base"
+            fi
+        done
+    done
+}
+
+function stop_conflicting_services() {
+    local service
+    local to_stop=()
+
+    for service in "${PHP_SERVICES[@]}" "${SEARCH_SERVICES[@]}"; do
+        if ! contains_service "$service"; then
+            to_stop+=("$service")
+        fi
+    done
+
+    if (( ${#to_stop[@]} > 0 )); then
+        docker compose stop "${to_stop[@]}" >/dev/null 2>&1 || true
+    fi
+}
+
+function start_project() {
+    local project="$1"
+    local service
+    local start_services=()
+
+    load_project "$project"
+    ensure_project_files
+    enable_vhosts
+    stop_conflicting_services
+
+    for service in $SERVICES; do
+        [[ "$service" == "nginx" ]] && continue
+        start_services+=("$service")
+    done
+
+    if (( ${#start_services[@]} > 0 )); then
+        docker compose up -d "${start_services[@]}"
+    fi
+
+    docker compose up -d --force-recreate nginx
+
+    printf 'Project %s is running: https://%s\n' "$project" "$DOMAIN"
+}
+
+function stop_project() {
+    local project="$1"
+    local service
+    local to_stop=()
+
+    load_project "$project"
+
+    for service in $SERVICES; do
+        case "$service" in
+            nginx|mysql|mysql57|mailhog|redis)
+                ;;
+            *)
+                to_stop+=("$service")
+                ;;
+        esac
+    done
+
+    if (( ${#to_stop[@]} > 0 )); then
+        docker compose stop "${to_stop[@]}"
+    fi
+
+    for service in $ACTIVE_VHOSTS; do
+        rm -f "$NGINX_ENABLED_DIR/$service.conf" "$NGINX_ENABLED_DIR/$service-ssl.conf"
+    done
+
+    docker compose up -d --force-recreate nginx
+    printf 'Project %s stopped.\n' "$project"
+}
+
+function list_projects() {
+    local config project
+
+    find "$PROJECTS_DIR" -mindepth 2 -maxdepth 2 -name project.env | sort | while read -r config; do
+        project="$(basename "$(dirname "$config")")"
+        printf '%s -> %s\n' "$project" "$config"
+    done
+}
+
+function init_project() {
+    local project="$1"
+
+    load_project "$project"
+    ensure_project_files
+    printf 'Project %s is initialized: %s\n' "$project" "$(project_config "$project")"
+}
+
+action="${1:-}"
+project="${2:-}"
+
+case "$action" in
+    start)
+        [[ -n "$project" ]] || die "Project name is required."
+        start_project "$project"
+        ;;
+    init)
+        [[ -n "$project" ]] || die "Project name is required."
+        init_project "$project"
+        ;;
+    stop)
+        [[ -n "$project" ]] || die "Project name is required."
+        stop_project "$project"
+        ;;
+    list)
+        list_projects
+        ;;
+    -h|--help|help|"")
+        usage
+        ;;
+    *)
+        usage
+        exit 1
+        ;;
+esac

@@ -4,4 +4,4 @@ if [ -z "$1" ]; then
 EG: ./scripts/shell php72"
     exit 1
 fi
-docker-compose exec --user nginx "$@" bash
+docker compose exec --user nginx "$@" bash
