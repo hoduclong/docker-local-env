@@ -838,9 +838,9 @@ function createEtcHostEntry()
 
 function reloadNginx()
 {
-    local _nginxTest=$(docker-compose exec nginx nginx -t)
+    local _nginxTest=$(docker compose exec nginx nginx -t)
     if [[ $? -eq 0 ]]; then
-        docker-compose exec nginx nginx -s reload || _die "Nginx couldn't be reloaded."
+        docker compose exec nginx nginx -s reload || _die "Nginx couldn't be reloaded."
     else
         echo "$_nginxTest"
     fi

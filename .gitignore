@@ -1,0 +1,51 @@
+# macOS / editor local files
+.DS_Store
+.idea/
+.vscode/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Runtime logs
+logs/*
+!logs/.keepme
+!logs/nginx/
+logs/nginx/*
+!logs/nginx/.keepme
+
+# Runtime database data
+data/*
+!data/.keepme
+!data/mysql/
+data/mysql/*
+!data/mysql/.keepme
+!data/mysql/.gitkeep
+data/mysql57/
+
+# Database dumps
+databases/import/*
+!databases/import/.keepme
+databases/export/*
+!databases/export/.keepme
+
+# Local source checkouts
+sources/*
+!sources/.keepme
+
+# Local nginx output
+conf/nginx/conf.d/*.conf
+conf/nginx/enabled.d/*
+!conf/nginx/enabled.d/.gitkeep
+conf/nginx/ssl/*
+!conf/nginx/ssl/.keepme
+
+# Local project profiles
+conf/projects/*
+!conf/projects/project.env.example
+!conf/projects/.gitkeep
+
+# One-off scratch files
+ERR:*
+OK:*

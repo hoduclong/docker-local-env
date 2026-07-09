@@ -5,7 +5,7 @@ services:
     image: nginx-mage:v1.0
     hostname: nginx
     volumes:
-      - ./conf/nginx/conf.d:/etc/nginx/conf.d
+      - ./conf/nginx/enabled.d:/etc/nginx/conf.d
       - ./conf/nginx/ssl:/etc/nginx/ssl
       - ./logs/nginx:/var/log/nginx
       - ./sources:/home/public_html
@@ -112,14 +112,18 @@ services:
     image: php8.1-c2-mage:v1.0
     hostname: php81-c2
     extra_hosts:
-      - "host.docker.internal:host-gateway" 
+      - "host.docker.internal:host-gateway"
+    environment:
+      - COMPOSER_PROCESS_TIMEOUT=2000
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       - ./sources:/home/public_html
       - composer_cache:/home/nginx/.composer
-      - ./conf/php/php81-c2/magento.conf:/usr/local/etc/php-fpm.d/www.conf
+      - ./conf/php/php81-c2/magento.conf:/etc/php/8.1/fpm/pool.d/www.conf
       - ./conf/php/php81-c2/php.ini:/etc/php/8.1/fpm/php.ini
       - ./conf/php/php81-c2/php.ini:/etc/php/8.1/cli/php.ini
-      - ./conf/php/php81-c2/php.ini:/usr/local/etc/php/php.ini
   php82:
     build:
       context: ./build/php82
@@ -195,7 +199,7 @@ services:
       - 3309:3306
 
   mailhog:
-    image: mailhog/mailhog
+    image: axllent/mailpit
     ports:
       - 1025:1025
       - 8025:8025
@@ -219,7 +223,8 @@ services:
       - DISABLE_SECURITY_PLUGIN=true
       - compatibility.override_main_response_version=true
       - bootstrap.memory_lock=true
-      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    mem_limit: 1536m
     ulimits:
       memlock:
         soft: -1
@@ -258,7 +263,8 @@ services:
       - node.name=elasticseach
       - cluster.name=es-docker-cluster
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    mem_limit: 1536m
     ulimits:
       memlock:
         soft: -1
@@ -268,17 +274,22 @@ services:
       - elasticsearch-data8:/usr/share/elasticsearch8/data
     ports:
       - "9200:9200"
+    networks:
+      default:
+        aliases:
+          - elasticsearch
 
   opensearch3:
     image: opensearchproject/opensearch:3
-    container_name: opensearch
+    container_name: opensearch3
     restart: unless-stopped
     environment:
       - discovery.type=single-node
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Opensearch@86421
       - DISABLE_SECURITY_PLUGIN=true
       - bootstrap.memory_lock=true
-      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+    mem_limit: 1536m
     ulimits:
       memlock:
         soft: -1
@@ -302,7 +313,8 @@ services:
           - node.name=elasticseach
           - cluster.name=es-docker-cluster
           - bootstrap.memory_lock=true
-          - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      mem_limit: 1536m
       ulimits:
           memlock:
               soft: -1

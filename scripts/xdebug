@@ -345,7 +345,7 @@ function validateArgs()
 function restartPhpContainer()
 {
     _arrow "Reload container ${APP_PHP}"
-    docker-compose restart ${APP_PHP} || _die "${APP_PHP} cannot reload."
+    docker compose restart ${APP_PHP} || _die "${APP_PHP} cannot reload."
     _success "Container ${APP_PHP} reloaded."
 }
 
@@ -390,7 +390,7 @@ function checkPhpContainerRunning()
 function statusXdebug()
 {
     _arrow "Check Xdebug status for ${APP_PHP}"
-    if [[ $(docker-compose exec ${APP_PHP} php -i | grep xdebug) ]]; then
+    if [[ $(docker compose exec ${APP_PHP} php -i | grep xdebug) ]]; then
         _success "${APP_PHP}: Xdebug enabled"
     XDEBUG_STATUS=1
     else 

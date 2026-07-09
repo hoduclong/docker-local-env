@@ -240,7 +240,6 @@ function checkCmdDependencies()
       date
       find
       awk
-      docker-compose
       docker
     )
 
@@ -349,7 +348,7 @@ function checkDomainExist ()
    if [[ -f ${NGINX_SITES_CONF_D}/$VHOST_DOMAIN.conf ]]; then 
         _success "Domain exists"
     else
-        _error "Domain not exist, Did you set it up on docker-compose system?"
+        _error "Domain not exist, Did you set it up on docker compose system?"
         exit 1
     fi
 }
@@ -410,7 +409,7 @@ function getDomainPhpVersion()
 
 function checkDomainMagentoFullPageCacheStatus()
 {
-    FPC_STATUS=$(docker-compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento config:show system/full_page_cache/caching_application 2>&1)
+    FPC_STATUS=$(docker compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento config:show system/full_page_cache/caching_application 2>&1)
     # Remove /r
     FPC_STATUS=${FPC_STATUS%$'\r'}
     if [[ "$FPC_STATUS" == "2" ]]; then
@@ -437,12 +436,12 @@ function enableVarnish()
     checkDomainMagentoFullPageCacheStatus
     if [[ "$FPC_STATUS" != "2" ]]; then
         _arrow "Configuring Varnish as default full page cache for $VHOST_DOMAIN"
-        docker-compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento config:set system/full_page_cache/caching_application 2 || _die "Configure Varnish as default full page cache for $VHOST_DOMAIN failed"
+        docker compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento config:set system/full_page_cache/caching_application 2 || _die "Configure Varnish as default full page cache for $VHOST_DOMAIN failed"
         _arrow "Configure $VHOST_DOMAIN Magento env.php with varnish config"
-        docker-compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento setup:config:set --http-cache-hosts=varnish:6081 || _die "Cannot configure $VHOST_DOMAIN Magento env.php with varnish config"
+        docker compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento setup:config:set --http-cache-hosts=varnish:6081 || _die "Cannot configure $VHOST_DOMAIN Magento env.php with varnish config"
         _success "Configure Varnish as default full page cache for $VHOST_DOMAIN successful"
         _arrow "Flush $VHOST_DOMAIN Magento cache"
-        docker-compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento cache:flush || _die "Cannot flush $VHOST_DOMAIN Magento cache"
+        docker compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento cache:flush || _die "Cannot flush $VHOST_DOMAIN Magento cache"
         _success "Flush $VHOST_DOMAIN Magento cache successful"
     fi
 
@@ -461,11 +460,11 @@ function disableVarnish()
     checkDomainMagentoFullPageCacheStatus
     if [[ "$FPC_STATUS" == "2" ]]; then
         _arrow "Disable Varnish as default full page cache, Enable Build-in cache for $VHOST_DOMAIN"
-        docker-compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento config:set system/full_page_cache/caching_application 1 || _die "Cannot disable Varnish as default full page cache, Enable Build-in cache for $VHOST_DOMAIN"
+        docker compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento config:set system/full_page_cache/caching_application 1 || _die "Cannot disable Varnish as default full page cache, Enable Build-in cache for $VHOST_DOMAIN"
         _arrow "Disable Varnish as default full page cache, Enable Build-in cache for $VHOST_DOMAIN successful"
         _arrow "You need to manual remove varnish config line on your $VHOST_DOMAIN Magento env.php"
         _arrow "Flush $VHOST_DOMAIN Magento cache"
-        docker-compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento cache:flush || _die "Cannot flush $VHOST_DOMAIN Magento cache"
+        docker compose exec --user nginx $DOMAIN_PHP_VERSION php /home/public_html/$DOC_ROOT/bin/magento cache:flush || _die "Cannot flush $VHOST_DOMAIN Magento cache"
         _success "Flush $VHOST_DOMAIN Magento cache successful"
     fi
 
@@ -488,10 +487,10 @@ function statusVarnish()
 
 function reloadNginx()
 {
-    local _nginxTest=$(docker-compose exec nginx nginx -t)
+    local _nginxTest=$(docker compose exec nginx nginx -t)
     _arrow "Reload nginx"
     if [[ $? -eq 0 ]]; then
-        docker-compose exec nginx nginx -s reload || _die "Nginx couldn't be reloaded."
+        docker compose exec nginx nginx -s reload || _die "Nginx couldn't be reloaded."
         _success "Nginx reloaded"
     else
         echo "$_nginxTest"
