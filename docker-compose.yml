@@ -16,6 +16,28 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
+  nginx130:
+    image: nginx:1.30.0
+    hostname: nginx130
+    volumes:
+      - ./conf/nginx/enabled.d:/etc/nginx/conf.d
+      - ./conf/nginx/ssl:/etc/nginx/ssl
+      - ./logs/nginx:/var/log/nginx
+      - ./sources:/home/public_html
+      - ./conf/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - 80:80
+      - 443:443
+    depends_on:
+      - php85
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
   php70:
     build:
       context: ./build/php70
@@ -161,6 +183,31 @@ services:
       - ./conf/php/php84/magento.conf:/etc/php/8.4/fpm/pool.d/www.conf
       - ./conf/php/php84/php.ini:/etc/php/8.4/fpm/php.ini
       - ./conf/php/php84/php.ini:/etc/php/8.4/cli/php.ini
+  php85:
+    build:
+      context: ./build/php85
+    image: php8.5-mage:v1.0
+    hostname: php85
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - COMPOSER_AUTH=${COMPOSER_AUTH:-}
+      - COMPOSER_PROCESS_TIMEOUT=${COMPOSER_PROCESS_TIMEOUT:-2000}
+      - ENABLE_XDEBUG=${ENABLE_XDEBUG:-0}
+    volumes:
+      - ./sources:/home/public_html
+      - composer_cache:/home/nginx/.composer
+      - ./conf/php/php85/magento.conf:/etc/php/8.5/fpm/pool.d/www.conf
+      - ./conf/php/php85/php.ini:/etc/php/8.5/fpm/php.ini
+      - ./conf/php/php85/php.ini:/etc/php/8.5/cli/php.ini
+    healthcheck:
+      test: ["CMD-SHELL", "php-fpm8.5 -t >/dev/null 2>&1 && php -v >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
   mysql:
     hostname: mysql
     image: mysql:${MYSQL_VERSION}
@@ -190,6 +237,30 @@ services:
       - ./conf/mysql/conf.d:/etc/mysql/conf.d
     ports:
       - 3309:3306
+
+  mysql84:
+    hostname: mysql84
+    image: mysql:8.4.6
+    command:
+      - --mysql-native-password=ON
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_allowed_packet=1024M
+    environment:
+      - MYSQL_DATABASE=${ROWE249_MYSQL_DATABASE:-}
+      - MYSQL_USER=${ROWE249_MYSQL_USER:-}
+      - MYSQL_PASSWORD=${ROWE249_MYSQL_PASSWORD:-}
+      - MYSQL_ROOT_PASSWORD=${ROWE249_MYSQL_ROOT_PASSWORD:-}
+    volumes:
+      - mysql84_data:/var/lib/mysql
+      - ./conf/mysql84/conf.d:/etc/mysql/conf.d:ro
+    ports:
+      - "127.0.0.1:3310:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
 
   mailhog:
     image: axllent/mailpit
@@ -273,13 +344,13 @@ services:
           - elasticsearch
 
   opensearch3:
-    image: opensearchproject/opensearch:3
-    container_name: opensearch3
+    image: opensearchproject/opensearch:3.2.0
+    hostname: opensearch3
     restart: unless-stopped
     environment:
       - discovery.type=single-node
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Opensearch@86421
-      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${ROWE249_OPENSEARCH_INITIAL_ADMIN_PASSWORD:-}
+      - DISABLE_SECURITY_PLUGIN=${ROWE249_OPENSEARCH_DISABLE_SECURITY:-true}
       - bootstrap.memory_lock=true
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
     mem_limit: 1536m
@@ -287,9 +358,11 @@ services:
       memlock:
         soft: -1
         hard: -1
+    volumes:
+      - opensearch3_data:/usr/share/opensearch/data
     ports:
-      - "9200:9200"
-      - "9300:9300"
+      - "127.0.0.1:9201:9200"
+      - "127.0.0.1:9301:9300"
     healthcheck:
       test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
       interval: 30s
@@ -338,6 +411,22 @@ services:
       ports:
           - 5672:5672
           - 15672:15672
+  rabbitmq43:
+      image: rabbitmq:4.3.1-management
+      hostname: rabbitmq43
+      volumes:
+          - rabbitmq43_data:/var/lib/rabbitmq/
+      environment:
+          RABBITMQ_DEFAULT_USER: ${ROWE249_RABBITMQ_USER:-}
+          RABBITMQ_DEFAULT_PASS: ${ROWE249_RABBITMQ_PASSWORD:-}
+      ports:
+          - "127.0.0.1:5673:5672"
+          - "127.0.0.1:15673:15672"
+      healthcheck:
+          test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+          interval: 30s
+          timeout: 10s
+          retries: 5
   phpmyadmin:
     image: phpmyadmin
     restart: always
@@ -367,11 +456,65 @@ services:
     volumes:
       - ./conf/varnish/default.vcl:/etc/varnish/default.vcl
 
+  varnish8:
+    image: varnish:8.0.0
+    hostname: varnish8
+    ports:
+      - "127.0.0.1:6082:6081"
+    depends_on:
+      - nginx130
+    volumes:
+      - ./conf/varnish/rowe249.vcl:/etc/varnish/default.vcl:ro
+    command: ["varnishd", "-F", "-f", "/etc/varnish/default.vcl", "-a", ":6081", "-s", "malloc,256m"]
+
+  rowe249-cron:
+    image: php8.5-mage:v1.0
+    hostname: rowe249-cron
+    depends_on:
+      - php85
+      - mysql84
+      - redis
+      - opensearch3
+    working_dir: /home/public_html/local.rowe.com
+    environment:
+      - COMPOSER_AUTH=${COMPOSER_AUTH:-}
+      - ENABLE_XDEBUG=0
+      - ROWE249_CRON_INTERVAL=${ROWE249_CRON_INTERVAL:-60}
+    volumes:
+      - ./sources:/home/public_html
+      - composer_cache:/home/nginx/.composer
+      - ./conf/php/php85/php.ini:/etc/php/8.5/cli/php.ini
+    command: ["bash", "-lc", "trap 'exit 0' TERM INT; while :; do php bin/magento cron:run || true; sleep \"$${ROWE249_CRON_INTERVAL}\" & wait $$!; done"]
+
+  rowe249-consumer:
+    image: php8.5-mage:v1.0
+    hostname: rowe249-consumer
+    depends_on:
+      - php85
+      - mysql84
+      - redis
+      - opensearch3
+      - rabbitmq43
+    working_dir: /home/public_html/local.rowe.com
+    environment:
+      - COMPOSER_AUTH=${COMPOSER_AUTH:-}
+      - ENABLE_XDEBUG=0
+      - ROWE249_CONSUMERS_ENABLED=${ROWE249_CONSUMERS_ENABLED:-0}
+      - ROWE249_CONSUMERS=${ROWE249_CONSUMERS:-async.operations.all}
+    volumes:
+      - ./sources:/home/public_html
+      - composer_cache:/home/nginx/.composer
+      - ./conf/php/php85/php.ini:/etc/php/8.5/cli/php.ini
+    command: ["bash", "-lc", "if [ \"$${ROWE249_CONSUMERS_ENABLED}\" != \"1\" ]; then echo 'rowe249 consumers disabled'; sleep infinity; fi; for consumer in $${ROWE249_CONSUMERS}; do php bin/magento queue:consumers:start \"$${consumer}\" --max-messages=10000 & done; wait"]
+
 volumes: 
   composer_cache:
   composer_cache_file:
+  mysql84_data:
   elasticsearch-data:
   elasticsearch-data8:
   opensearch-data:
+  opensearch3_data:
   redis_data:
   rabbitmq-data:
+  rabbitmq43_data:

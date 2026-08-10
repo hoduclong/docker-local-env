@@ -8,9 +8,15 @@ PROJECTS_DIR="conf/projects"
 NGINX_AVAILABLE_DIR="conf/nginx/conf.d"
 NGINX_ENABLED_DIR="conf/nginx/enabled.d"
 
-PHP_SERVICES=(php70 php71 php72 php73 php74 php74-c2 php81-c2 php82 php83 php84)
+PROJECT_NAME=""
+
+PHP_SERVICES=(php70 php71 php72 php73 php74 php74-c2 php81-c2 php82 php83 php84 php85)
 SEARCH_SERVICES=(elasticsearch elasticsearch8 opensearch opensearch3)
-COMMON_SERVICES=(nginx mysql mailhog redis)
+DB_SERVICES=(mysql mysql57 mysql84)
+NGINX_SERVICES=(nginx nginx130)
+CACHE_SERVICES=(redis valkey9)
+MQ_SERVICES=(rabbitmq rabbitmq43)
+BACKGROUND_SERVICES=(rowe249-cron rowe249-consumer)
 
 function usage() {
     cat <<USAGE
@@ -84,10 +90,16 @@ function build_services() {
     local php_service="$1"
     local search_service="$2"
     local db_service="$3"
-    local services=(nginx "$db_service" mailhog redis "$php_service")
+    local nginx_service="${4:-nginx}"
+    local cache_service="${5:-redis}"
+    local mq_service="${6:-}"
+    local services=("$nginx_service" "$db_service" mailhog "$cache_service" "$php_service")
 
     if [[ -n "$search_service" && "$search_service" != "none" ]]; then
         services+=("$search_service")
+    fi
+    if [[ -n "$mq_service" && "$mq_service" != "none" ]]; then
+        services+=("$mq_service")
     fi
 
     printf '%s ' "${services[@]}"
@@ -96,7 +108,7 @@ function build_services() {
 function create_project_config() {
     local project="$1"
     local config project_dir
-    local domain root_dir app_type php_service search_service db_service active_vhosts services
+    local domain root_dir app_type php_service search_service db_service nginx_service cache_service mq_service active_vhosts services
 
     config="$(project_config "$project")"
     project_dir="$(dirname "$config")"
@@ -115,16 +127,24 @@ function create_project_config() {
     app_type="$(prompt "APP_TYPE (magento1|magento2|wordpress|laravel|default)" "magento2")"
     php_service="$(normalize_php_service "$(prompt "PHP_SERVICE" "php81-c2")")"
     search_service="$(prompt "SEARCH_SERVICE (elasticsearch|elasticsearch8|opensearch|opensearch3|none)" "elasticsearch")"
-    db_service="$(prompt "DB_SERVICE (mysql|mysql57)" "mysql")"
+    db_service="$(prompt "DB_SERVICE (mysql|mysql57|mysql84)" "mysql")"
+    nginx_service="$(prompt "NGINX_SERVICE (nginx|nginx130)" "nginx")"
+    cache_service="$(prompt "CACHE_SERVICE (redis|valkey9)" "redis")"
+    mq_service="$(prompt "MQ_SERVICE (rabbitmq|rabbitmq43|none)" "none")"
     active_vhosts="$(prompt "ACTIVE_VHOSTS" "$domain")"
 
     validate_service "$php_service"
     validate_service "$db_service"
+    validate_service "$nginx_service"
+    validate_service "$cache_service"
     if [[ "$search_service" != "none" ]]; then
         validate_service "$search_service"
     fi
+    if [[ "$mq_service" != "none" ]]; then
+        validate_service "$mq_service"
+    fi
 
-    services="$(build_services "$php_service" "$search_service" "$db_service")"
+    services="$(build_services "$php_service" "$search_service" "$db_service" "$nginx_service" "$cache_service" "$mq_service")"
     services="${services% }"
 
     mkdir -p "$project_dir"
@@ -135,6 +155,9 @@ APP_TYPE=$app_type
 PHP_SERVICE=$php_service
 SEARCH_SERVICE=$search_service
 DB_SERVICE=$db_service
+NGINX_SERVICE=$nginx_service
+CACHE_SERVICE=$cache_service
+MQ_SERVICE=$mq_service
 SERVICES="$services"
 ACTIVE_VHOSTS="$active_vhosts"
 EOF
@@ -154,12 +177,24 @@ function load_project() {
     # shellcheck disable=SC1090
     source "$config"
 
+    PROJECT_NAME="$project"
+
     [[ -n "${DOMAIN:-}" ]] || die "DOMAIN is required in $config"
     [[ -n "${ROOT_DIR:-}" ]] || ROOT_DIR="$DOMAIN"
     [[ -n "${APP_TYPE:-}" ]] || APP_TYPE="magento2"
     [[ -n "${PHP_SERVICE:-}" ]] || die "PHP_SERVICE is required in $config"
+    [[ -n "${NGINX_SERVICE:-}" ]] || NGINX_SERVICE="nginx"
+    [[ -n "${CACHE_SERVICE:-}" ]] || CACHE_SERVICE="redis"
+    [[ -n "${MQ_SERVICE:-}" ]] || MQ_SERVICE=""
     [[ -n "${SERVICES:-}" ]] || die "SERVICES is required in $config"
     [[ -n "${ACTIVE_VHOSTS:-}" ]] || ACTIVE_VHOSTS="$DOMAIN"
+
+    if [[ "${ENABLE_CRON:-0}" == "1" && -n "${CRON_SERVICE:-}" ]] && ! contains_service "$CRON_SERVICE"; then
+        SERVICES="$SERVICES $CRON_SERVICE"
+    fi
+    if [[ "${ENABLE_CONSUMER:-0}" == "1" && -n "${CONSUMER_SERVICE:-}" ]] && ! contains_service "$CONSUMER_SERVICE"; then
+        SERVICES="$SERVICES $CONSUMER_SERVICE"
+    fi
 }
 
 function ensure_project_services_for_setup() {
@@ -175,6 +210,12 @@ function ensure_project_services_for_setup() {
 
 function ensure_vhost() {
     local domain="$1"
+    local project_vhost="$PROJECTS_DIR/$PROJECT_NAME/nginx/$domain.conf"
+
+    if [[ -f "$project_vhost" ]]; then
+        printf 'Project nginx vhost exists: %s\n' "$project_vhost"
+        return 0
+    fi
 
     if [[ -f "$NGINX_AVAILABLE_DIR/$domain.conf" ]]; then
         printf 'Nginx vhost exists: %s\n' "$NGINX_AVAILABLE_DIR/$domain.conf"
@@ -223,14 +264,20 @@ function contains_service() {
 }
 
 function enable_vhosts() {
-    local domain file base
+    local domain file base project_file
 
     mkdir -p "$NGINX_ENABLED_DIR"
     find "$NGINX_ENABLED_DIR" -maxdepth 1 -type f -name '*.conf' -delete
 
     for domain in $ACTIVE_VHOSTS; do
         for base in "$domain.conf" "$domain-ssl.conf"; do
+            project_file="$PROJECTS_DIR/$PROJECT_NAME/nginx/$base"
             file="$NGINX_AVAILABLE_DIR/$base"
+            if [[ -f "$project_file" ]]; then
+                cp "$project_file" "$NGINX_ENABLED_DIR/$base"
+                printf 'Enabled project nginx vhost: %s\n' "$base"
+                continue
+            fi
             if [[ -f "$file" ]]; then
                 cp "$file" "$NGINX_ENABLED_DIR/$base"
                 printf 'Enabled nginx vhost: %s\n' "$base"
@@ -243,7 +290,7 @@ function stop_conflicting_services() {
     local service
     local to_stop=()
 
-    for service in "${PHP_SERVICES[@]}" "${SEARCH_SERVICES[@]}"; do
+    for service in "${PHP_SERVICES[@]}" "${SEARCH_SERVICES[@]}" "${DB_SERVICES[@]}" "${NGINX_SERVICES[@]}" "${CACHE_SERVICES[@]}" "${MQ_SERVICES[@]}" "${BACKGROUND_SERVICES[@]}"; do
         if ! contains_service "$service"; then
             to_stop+=("$service")
         fi
@@ -265,7 +312,7 @@ function start_project() {
     stop_conflicting_services
 
     for service in $SERVICES; do
-        [[ "$service" == "nginx" ]] && continue
+        [[ "$service" == "$NGINX_SERVICE" ]] && continue
         start_services+=("$service")
     done
 
@@ -273,9 +320,11 @@ function start_project() {
         docker compose up -d "${start_services[@]}"
     fi
 
-    docker compose up -d --force-recreate nginx
+    docker compose up -d --force-recreate "$NGINX_SERVICE"
 
-    printf 'Project %s is running: https://%s\n' "$project" "$DOMAIN"
+    if [[ "${PROJECT_PRINT_URL:-0}" == "1" ]]; then
+        printf 'Project %s is running: https://%s\n' "$project" "$DOMAIN"
+    fi
 }
 
 function stop_project() {
@@ -287,7 +336,7 @@ function stop_project() {
 
     for service in $SERVICES; do
         case "$service" in
-            nginx|mysql|mysql57|mailhog|redis)
+            nginx|nginx130|mysql|mysql57|mysql84|mailhog|redis|valkey9)
                 ;;
             *)
                 to_stop+=("$service")
@@ -303,7 +352,9 @@ function stop_project() {
         rm -f "$NGINX_ENABLED_DIR/$service.conf" "$NGINX_ENABLED_DIR/$service-ssl.conf"
     done
 
-    docker compose up -d --force-recreate nginx
+    if service_exists "$NGINX_SERVICE"; then
+        docker compose up -d --force-recreate "$NGINX_SERVICE"
+    fi
     printf 'Project %s stopped.\n' "$project"
 }
 

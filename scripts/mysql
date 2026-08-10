@@ -1,8 +1,29 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-containerNameDB=$(docker inspect -f '{{.Name}}' $(docker compose ps -q mysql) | cut -c2-)
+set -e
 
-mysqRootPass=$(docker inspect -f '{{range $index, $value := .Config.Env}}{{println $value}}{{end}}'  $containerNameDB | grep MYSQL_ROOT_PASSWORD)
-rootPass="${mysqRootPass/MYSQL_ROOT_PASSWORD=/$replace}"
+db_service="${DB_SERVICE:-mysql}"
+root_pass="${DB_ROOT_PASSWORD:-}"
 
-docker compose exec mysql mysql -uroot -p${rootPass}
+if [[ $# -gt 0 && "$1" != -* ]]; then
+    db_service="$1"
+    shift
+fi
+container_id="$(docker compose ps -q "$db_service")"
+
+if [[ -z "$container_id" ]]; then
+    echo "Database service ${db_service} is not running."
+    exit 1
+fi
+
+if [[ -z "$root_pass" ]]; then
+    container_name="$(docker inspect -f '{{.Name}}' "$container_id" | cut -c2-)"
+    mysql_root_line="$(docker inspect -f '{{range $index, $value := .Config.Env}}{{println $value}}{{end}}' "$container_name" | grep '^MYSQL_ROOT_PASSWORD=' || true)"
+    root_pass="${mysql_root_line#MYSQL_ROOT_PASSWORD=}"
+fi
+
+if [[ -n "$root_pass" ]]; then
+    docker compose exec -e MYSQL_PWD="$root_pass" "$db_service" mysql -uroot "$@"
+else
+    docker compose exec "$db_service" mysql -uroot "$@"
+fi

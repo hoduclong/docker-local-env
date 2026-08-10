@@ -241,6 +241,13 @@ make help
 | phpmyadmin | service phpmyadmin  |
 | phpredmin | service phpredmin  |
 | varnish | service varnish  |
+| php85 | PHP 8.5 + Composer 2.10 dùng cho profile `rowe249` |
+| mysql84 | MySQL 8.4 tách volume riêng cho profile `rowe249` |
+| opensearch3 | OpenSearch 3 tách volume riêng cho profile `rowe249` |
+| valkey9 | Valkey 9 tách volume riêng cho profile `rowe249` |
+| rabbitmq43 | RabbitMQ 4.3 tách volume riêng cho profile `rowe249` |
+| nginx130 | nginx 1.30 dùng cho profile `rowe249` |
+| varnish8 | Varnish 8 optional cho profile `rowe249` |
 
 
 #### Các command của hệ thống
@@ -258,6 +265,46 @@ make help
 | xdebug | Command sử dụng để bật/tắt xdebug của 1 service php được lựa chọn |
 | varnish | Command sử dụng để bật/tắt varnish của 1 domain được lựa chọn |
 | project | Command start/stop/init project profile, tự enable đúng nginx vhost và đúng service của project |
+
+#### Rowe Adobe Commerce 2.4.9 profile
+
+Profile `rowe249` dùng để test Docker infrastructure cho Adobe Commerce 2.4.9 song song với profile `rowe` hiện tại.
+
+```bash
+make rowe249
+make rowe249-shell
+make stop-rowe249
+```
+
+Stack này dùng `php85`, `mysql84`, `opensearch3`, `valkey9`, `rabbitmq43`, `nginx130` và `mailhog`. Dữ liệu được tách bằng Docker volume riêng, không reuse data MySQL/Search/Cache của `rowe`.
+
+Các biến local cần có trong `.env` hoặc shell:
+
+```bash
+ROWE249_MYSQL_DATABASE=rowe249
+ROWE249_MYSQL_USER=rowe249
+ROWE249_MYSQL_PASSWORD=local-password
+ROWE249_MYSQL_ROOT_PASSWORD=local-root-password
+ROWE249_RABBITMQ_USER=rowe249
+ROWE249_RABBITMQ_PASSWORD=local-rabbit-password
+```
+
+Composer auth cho `repo.magento.com` phải để local-only qua `COMPOSER_AUTH` hoặc composer cache volume, không commit vào repo. Runbook chi tiết nằm ở `docs/rowe249-adobe-commerce-2.4.9-runbook.md`.
+
+Import database vào MySQL 8.4 của `rowe249`:
+
+```bash
+make setup-db84 D=rowe249 S=/path/to/backup.sql
+make setup-db84 D=rowe249 S=/path/to/backup.sql.gz
+```
+
+`setup-db84` dùng `ROWE249_MYSQL_ROOT_PASSWORD` nếu có, fallback về `root` để tương thích volume local cũ.
+
+Hoặc dùng command chung:
+
+```bash
+make setup-db D=rowe249 S=/path/to/backup.sql DB_SERVICE=mysql84 DB_ROOT_PASSWORD=root
+```
 
 #### Hệ thống email catch all
 

@@ -18,6 +18,8 @@ SERVICES_ES7 := $(COMMON_SERVICES_7) php81-c2 php83 php82 php73
 PHP_VERSION := $(if $(filter php%,$(P)),$(P),php$(P))
 ROOT_DIR := $(if $(R),$(R),$(D))
 IMPORT_SOURCE := $(if $(S),$(S),$(D).sql)
+MYSQL_SERVICE := $(if $(DB_SERVICE),$(DB_SERVICE),mysql)
+MYSQL_ROOT_PASSWORD_ARG := $(if $(DB_ROOT_PASSWORD),--root-password=$(DB_ROOT_PASSWORD),)
 
 .DEFAULT_GOAL := help
 
@@ -27,7 +29,7 @@ help: ## Show available make targets
 
 # ======= Project Profile Commands =======
 
-.PHONY: project-list maxcare stop-maxcare maxcare-shell mycar stop-mycar mycar-shell rowe stop-rowe rowe-shell
+.PHONY: project-list maxcare stop-maxcare maxcare-shell mycar stop-mycar mycar-shell rowe stop-rowe rowe-shell rowe249 stop-rowe249 rowe249-shell
 project-list: ## List configured project profiles
 	./scripts/project list
 
@@ -39,6 +41,15 @@ stop-rowe: ## Stop rowe project profile
 
 rowe-shell: ## Open php shell inside rowe project container
 	@$(MAKE) bash V=82 D=rowe
+
+rowe249: ## Start isolated Rowe Adobe Commerce 2.4.9 candidate stack
+	./scripts/project start rowe249
+
+stop-rowe249: ## Stop Rowe Adobe Commerce 2.4.9 candidate profile
+	./scripts/project stop rowe249
+
+rowe249-shell: ## Open php85 shell inside Rowe 2.4.9 candidate source
+	./scripts/shell php85 bash -c "cd /home/public_html/local.rowe.com && bash"
 
 maxcare: ## Start maxcare project profile
 	./scripts/project start maxcare
@@ -148,22 +159,22 @@ npm-run-watch: ## Run Plato frontend watch command inside php82 container
 
 # ======= Database Commands =======
 
-.PHONY: create-db import-db setup-db
-create-db: ## Create database. Usage: make create-db DB=<database>
-	./scripts/database create --database-name=$(DB)
+.PHONY: create-db import-db setup-db setup-db84
+create-db: ## Create database. Usage: make create-db DB=<database> [DB_SERVICE=mysql84] [DB_ROOT_PASSWORD=<root-pass>]
+	./scripts/database create --service=$(MYSQL_SERVICE) $(MYSQL_ROOT_PASSWORD_ARG) --database-name=$(DB)
 
-import-db: ## Import databases/import/<D>.sql into database <D>. Usage: make import-db D=<database>
-	./scripts/database import --source=$(D).sql --target=$(D)
+import-db: ## Import databases/import/<D>.sql into database <D>. Usage: make import-db D=<database> [DB_SERVICE=mysql84] [DB_ROOT_PASSWORD=<root-pass>]
+	./scripts/database import --service=$(MYSQL_SERVICE) $(MYSQL_ROOT_PASSWORD_ARG) --source=$(D).sql --target=$(D)
 
-setup-db: ## Create database and import SQL/GZ. Usage: make setup-db D=<database> S=<file.sql|file.sql.gz>
+setup-db: ## Create database and import SQL/GZ. Usage: make setup-db D=<database> S=<file.sql|file.sql.gz> [DB_SERVICE=mysql84] [DB_ROOT_PASSWORD=<root-pass>]
 	@echo "▶ Setup database: $(D)"
-	./scripts/database create --database-name=$(D)
+	./scripts/database create --service=$(MYSQL_SERVICE) $(MYSQL_ROOT_PASSWORD_ARG) --database-name=$(D)
 	@mkdir -p databases/import
 	@if echo "$(IMPORT_SOURCE)" | grep -q '\.gz$$'; then \
 		echo "▶ Detected .gz file, extracting..."; \
 		tmp_file="$(D)-import.sql"; \
 		gunzip -c "$(IMPORT_SOURCE)" > "databases/import/$$tmp_file"; \
-		./scripts/database import --source="$$tmp_file" --target=$(D); \
+		./scripts/database import --service=$(MYSQL_SERVICE) $(MYSQL_ROOT_PASSWORD_ARG) --source="$$tmp_file" --target=$(D); \
 		rm -f "databases/import/$$tmp_file"; \
 	else \
 		source_file="$$(basename "$(IMPORT_SOURCE)")"; \
@@ -171,9 +182,12 @@ setup-db: ## Create database and import SQL/GZ. Usage: make setup-db D=<database
 			cp "$(IMPORT_SOURCE)" "databases/import/$$source_file"; \
 		fi; \
 		echo "▶ Importing SQL file..."; \
-		./scripts/database import --source="$$source_file" --target=$(D); \
+		./scripts/database import --service=$(MYSQL_SERVICE) $(MYSQL_ROOT_PASSWORD_ARG) --source="$$source_file" --target=$(D); \
 	fi
 	@echo "✅ Database setup completed"
+
+setup-db84: ## Create/import database on mysql84. Usage: make setup-db84 D=<database> S=<file.sql|file.sql.gz>
+	@$(MAKE) setup-db D=$(D) S="$(S)" DB_SERVICE=mysql84 DB_ROOT_PASSWORD="$(if $(DB_ROOT_PASSWORD),$(DB_ROOT_PASSWORD),$${ROWE249_MYSQL_ROOT_PASSWORD:-root})"
 
 # ======= Site/Vhost Commands =======
 

@@ -211,6 +211,8 @@ Version $VERSION
         export                    Export database.
         import                    Import database.
         drop                      Drop database.
+        --service                 Docker Compose database service. Default: mysql.
+        --root-password           Root password override when container env is empty.
         -h, --help                Display this help and exit.
 
     Arg:
@@ -230,6 +232,8 @@ Version $VERSION
         ./scripts/$(basename "$0") list
       Create database:
         ./scripts/$(basename "$0") create --database-name=database_name
+      Create database on MySQL 8.4 service:
+        ./scripts/$(basename "$0") create --service=mysql84 --root-password=root --database-name=database_name
       Export database:
         ./scripts/$(basename "$0") export --database-name=database_name
       Drop database:
@@ -251,6 +255,12 @@ function processArgs()
             for arg in "${@:2}"
             do
                 case $arg in
+                    --service=*)
+                        DB_SERVICE="${arg#*=}"
+                    ;;
+                    --root-password=*)
+                        DB_ROOT_PASSWORD="${arg#*=}"
+                    ;;
                     --database-name=*)
                         DATABASE_NAME="${arg#*=}"
                     ;;  
@@ -268,6 +278,12 @@ function processArgs()
             for arg in "${@:2}"
             do
                 case $arg in
+                    --service=*)
+                        DB_SERVICE="${arg#*=}"
+                    ;;
+                    --root-password=*)
+                        DB_ROOT_PASSWORD="${arg#*=}"
+                    ;;
                     --database-name=*)
                         DATABASE_NAME="${arg#*=}"
                     ;;  
@@ -285,6 +301,12 @@ function processArgs()
             for arg in "${@:2}"
             do
                 case $arg in
+                    --service=*)
+                        DB_SERVICE="${arg#*=}"
+                    ;;
+                    --root-password=*)
+                        DB_ROOT_PASSWORD="${arg#*=}"
+                    ;;
                     --database-name=*)
                         DATABASE_NAME="${arg#*=}"
                     ;;  
@@ -302,6 +324,12 @@ function processArgs()
             for arg in "${@:2}"
             do
                 case $arg in
+                    --service=*)
+                        DB_SERVICE="${arg#*=}"
+                    ;;
+                    --root-password=*)
+                        DB_ROOT_PASSWORD="${arg#*=}"
+                    ;;
                     --source=*)
                         DATABASE_IMPORT_SOURCE_NAME="${arg#*=}"
                     ;;            
@@ -322,6 +350,12 @@ function processArgs()
             for arg in "${@:2}"
             do
                 case $arg in   
+                    --service=*)
+                        DB_SERVICE="${arg#*=}"
+                    ;;
+                    --root-password=*)
+                        DB_ROOT_PASSWORD="${arg#*=}"
+                    ;;
                     -h|--help)
                         _printUsage
                     ;;
@@ -356,6 +390,9 @@ function validateArgs()
             if [[ -z "$DATABASE_IMPORT_TARGET_NAME" ]]; then
                 _error "--target=... parameter is missing."
                 ERROR_COUNT=$((ERROR_COUNT + 1))
+            elif [[ ! ${DATABASE_IMPORT_TARGET_NAME} =~ $DATABASE_PATTERN ]]; then
+                _error "Invalid target database name, please choose other name!!"
+                ERROR_COUNT=$((ERROR_COUNT + 1))
             fi
             if [[ -z "$DATABASE_IMPORT_SOURCE_NAME" ]]; then
                 _error "--source=... parameter is missing."
@@ -386,6 +423,8 @@ function initDefaultArgs()
     TODAY="$(date +"%Y-%m-%d")"
     BACKDATE="$(date +"%Y-%m-%d")"
     DATABASE_PATTERN="^([[:alnum:]]([[:alnum:]_]{0,61}[[:alnum:]]))$"
+    DB_SERVICE="${DB_SERVICE:-mysql}"
+    DB_ROOT_PASSWORD="${DB_ROOT_PASSWORD:-}"
 
     YES_STRING=$"y"
     NO_STRING=$"n"
@@ -421,16 +460,59 @@ function checkCmdDependencies()
 
 function getMysqlInformation()
 {
-    containerNameDB=$(docker inspect -f '{{.Name}}' $(docker compose ps -q mysql) | cut -c2-)
+    local container_id mysql_root_line mysql_user_line mysql_pass_line
 
-    mysqlUser=$(docker inspect -f '{{range $index, $value := .Config.Env}}{{println $value}}{{end}}'  $containerNameDB | grep MYSQL_USER)
-    user="${mysqlUser/MYSQL_USER=/$replace}" 
+    container_id="$(docker compose ps -q "$DB_SERVICE")"
+    [[ -n "$container_id" ]] || _die "Database service ${DB_SERVICE} is not running."
 
-    mysqlPass=$(docker inspect -f '{{range $index, $value := .Config.Env}}{{println $value}}{{end}}'  $containerNameDB | grep MYSQL_PASSWORD)
-    pass="${mysqlPass/MYSQL_PASSWORD=/$replace}" 
+    containerNameDB=$(docker inspect -f '{{.Name}}' "$container_id" | cut -c2-)
 
-    mysqRootPass=$(docker inspect -f '{{range $index, $value := .Config.Env}}{{println $value}}{{end}}'  $containerNameDB | grep MYSQL_ROOT_PASSWORD)
-    rootPass="${mysqRootPass/MYSQL_ROOT_PASSWORD=/$replace}"
+    mysql_user_line=$(docker inspect -f '{{range $index, $value := .Config.Env}}{{println $value}}{{end}}'  "$containerNameDB" | grep '^MYSQL_USER=' || true)
+    user="${mysql_user_line#MYSQL_USER=}"
+
+    mysql_pass_line=$(docker inspect -f '{{range $index, $value := .Config.Env}}{{println $value}}{{end}}'  "$containerNameDB" | grep '^MYSQL_PASSWORD=' || true)
+    pass="${mysql_pass_line#MYSQL_PASSWORD=}"
+
+    mysql_root_line=$(docker inspect -f '{{range $index, $value := .Config.Env}}{{println $value}}{{end}}'  "$containerNameDB" | grep '^MYSQL_ROOT_PASSWORD=' || true)
+    rootPass="${DB_ROOT_PASSWORD:-${mysql_root_line#MYSQL_ROOT_PASSWORD=}}"
+}
+
+function mysqlExec()
+{
+    if [[ -n "$rootPass" ]]; then
+        docker compose exec -e MYSQL_PWD="$rootPass" "$DB_SERVICE" mysql -u root "$@"
+    else
+        docker compose exec "$DB_SERVICE" mysql -u root "$@"
+    fi
+}
+
+function mysqlExecT()
+{
+    if [[ -n "$rootPass" ]]; then
+        docker compose exec -T -e MYSQL_PWD="$rootPass" "$DB_SERVICE" mysql -u root "$@"
+    else
+        docker compose exec -T "$DB_SERVICE" mysql -u root "$@"
+    fi
+}
+
+function mysqldumpExecT()
+{
+    if [[ -n "$rootPass" ]]; then
+        docker compose exec -T -e MYSQL_PWD="$rootPass" "$DB_SERVICE" /usr/bin/mysqldump -u root "$@"
+    else
+        docker compose exec -T "$DB_SERVICE" /usr/bin/mysqldump -u root "$@"
+    fi
+}
+
+function databaseExists()
+{
+    local database_name query_result
+
+    database_name="$1"
+    query_result="$(mysqlExec --skip-column-names -e "show databases like '${database_name}'" 2>/dev/null)" \
+        || _die "Cannot query ${DB_SERVICE}. Please check DB_ROOT_PASSWORD or container status."
+
+    [[ "$query_result" == "$database_name" ]]
 }
 
 function checkDatabaseFileName()
@@ -450,11 +532,11 @@ function checkDatabaseFileName()
 function checkMysqlContainerRunning()
 {
 
-    _arrow "Check Mysql container is running?"
-    if [[ $($(pwd)/scripts/list-services | grep mysql) ]]; then
-        _success "Mysql container is running"
+    _arrow "Check ${DB_SERVICE} container is running?"
+    if [[ -n "$(docker compose ps -q "$DB_SERVICE")" && "$(docker inspect -f '{{.State.Running}}' "$(docker compose ps -q "$DB_SERVICE")")" == "true" ]]; then
+        _success "${DB_SERVICE} container is running"
     else
-        _error "Mysql container is not running, please start it!" && exit 1
+        _error "${DB_SERVICE} container is not running, please start it!" && exit 1
     fi
 }
 
@@ -470,16 +552,17 @@ function checkDatabaseName()
 
 function listMysqlDatabase()
 {
-    docker compose exec mysql mysql -u root --password=${rootPass} -e "show databases" 2>&1 | grep -v "Using a password"
+    mysqlExec -e "show databases"
 }
 
 function exportMysqlDatabase()
 {
     _arrow "Check database exist"
-    if [[ $(docker compose exec mysql mysql -u root -p${rootPass} --skip-column-names -e "show databases like '${DATABASE_NAME}'" 2>&1 | grep -v "Using a password" | grep -o "${DATABASE_NAME}") == ${DATABASE_NAME} ]]; then
+    if databaseExists "$DATABASE_NAME"; then
         _success "Database existed"
         _arrow "Export database"
-        docker compose exec -T mysql /usr/bin/mysqldump -u root --password=${rootPass} 2>&1 | grep -v "Using a password" > ${DES_DIR}/${DATABASE_NAME}-${BACKDATE}.sql
+        mysqldumpExecT "${DATABASE_NAME}" > "${DES_DIR}/${DATABASE_NAME}-${BACKDATE}.sql" \
+            || _die "Cannot export database ${DATABASE_NAME} from ${DB_SERVICE}."
         _success "Your database exported"
         echo "  >> Export file location:    ${DES_DIR}/${DATABASE_NAME}-${BACKDATE}.sql"
     else
@@ -494,11 +577,12 @@ function importMysqlDatabase()
     _arrow "Check database source"
     checkDatabaseFileName
     _arrow "Check database ${DATABASE_IMPORT_TARGET_NAME} exist?"
-    if [[ $(docker compose exec mysql mysql -u root -p${rootPass} --skip-column-names -e "show databases like '${DATABASE_NAME}'" 2>&1 | grep -v "Using a password" | grep -o "${DATABASE_NAME}") == ${DATABASE_NAME} ]]
+    if databaseExists "$DATABASE_IMPORT_TARGET_NAME"
     then
         _success "Database existed"
         _arrow "Import database"
-        docker compose exec -T mysql mysql --force -u root -p${rootPass} ${DATABASE_IMPORT_TARGET_NAME} < ${IMPORT_DIR}/${DATABASE_IMPORT_SOURCE_NAME} 2>&1 | grep -v "Using a password"
+        mysqlExecT --force ${DATABASE_IMPORT_TARGET_NAME} < "${IMPORT_DIR}/${DATABASE_IMPORT_SOURCE_NAME}" \
+            || _die "Cannot import ${DATABASE_IMPORT_SOURCE_NAME} into ${DATABASE_IMPORT_TARGET_NAME} on ${DB_SERVICE}."
         _success "Database name ${DATABASE_IMPORT_TARGET_NAME} imported"
     else 
         _error "Database ${DATABASE_IMPORT_TARGET_NAME} not exists. Please create it!!"
@@ -512,13 +596,14 @@ function createMysqlDatabase()
     _arrow "Check database name"
     checkDatabaseName
     _arrow "Check database ${DATABASE_NAME} exist?"
-    if [[ $(docker compose exec mysql mysql -u root -p${rootPass} --skip-column-names -e "show databases like '${DATABASE_NAME}'" 2>&1 | grep -v "Using a password" | grep -o "${DATABASE_NAME}") == ${DATABASE_NAME} ]]
+    if databaseExists "$DATABASE_NAME"
     then
         _error "Database existed, please choose other name!"
         exit 1
     else 
         _arrow "Database name avaiable, create database ${DATABASE_NAME}"
-        docker compose exec mysql mysql -u root -p${rootPass} --skip-column-names -e "create database ${DATABASE_NAME}" 2>&1 | grep -v "Using a password"
+        mysqlExec --skip-column-names -e "create database ${DATABASE_NAME}" \
+            || _die "Cannot create database ${DATABASE_NAME} on ${DB_SERVICE}."
         _success "Database name ${DATABASE_NAME} created"
         listMysqlDatabase
     fi
@@ -529,7 +614,7 @@ function dropMysqlDatabase()
     _arrow "Check database name"
     checkDatabaseName
     _arrow "Check database ${DATABASE_NAME} exist?"
-    if [[ $(docker compose exec mysql mysql -u root -p${rootPass} --skip-column-names -e "show databases like '${DATABASE_NAME}'" 2>&1 | grep -v "Using a password" | grep -o "${DATABASE_NAME}") == ${DATABASE_NAME} ]]
+    if databaseExists "$DATABASE_NAME"
     then
         _success "Database existed" 
     else 
@@ -539,7 +624,8 @@ function dropMysqlDatabase()
     if askYesOrNo $"Are you sure, bro?"
     then
         _arrow "drop database!"
-        docker compose exec mysql mysql -u root -p${rootPass} --skip-column-names -e "drop database ${DATABASE_NAME}" 2>&1 | grep -v "Using a password"
+        mysqlExec --skip-column-names -e "drop database ${DATABASE_NAME}" \
+            || _die "Cannot drop database ${DATABASE_NAME} on ${DB_SERVICE}."
         _success "Database name ${DATABASE_NAME} dropped"
         listMysqlDatabase
     else
